@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LTC 文獻快速檢索（相容版）</title>
+  <title>LTC 文獻快速檢索（相容版＋報告者/日期）</title>
   <style>
     :root { --bg:#0b1020; --card:#141a2e; --text:#e8ecf1; --muted:#aab3c2; --chip:#223055; --chip2:#2a375f; --accent:#6aa7ff; --warn:#ffb84d; }
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans TC","Microsoft JhengHei",sans-serif}
@@ -79,6 +79,10 @@
         <div class="chips" id="countries"></div>
         <div style="font-weight:600;margin:12px 0 6px">構面/維度快速篩選</div>
         <div class="chips" id="dimensions"></div>
+        <div style="font-weight:600;margin:12px 0 6px">報告人/報告者（合併）快速篩選</div>
+        <div class="chips" id="reporters"></div>
+        <div style="font-weight:600;margin:12px 0 6px">讀書會日期快速篩選</div>
+        <div class="chips" id="dates"></div>
       </div>
     </div>
 
@@ -89,14 +93,14 @@
 
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script>
-    const state = { rows: [], q: "", country: null, dim: null };
+    const state = { rows: [], q: "", country: null, dim: null, reporter: null, date: null };
     const $ = (sel) => document.querySelector(sel);
     const msg = (s) => { document.getElementById('msg').innerHTML = s || ''; };
 
     function normHeader(h){
       return (h||'')
-        .replace(/^\\ufeff/, '') // BOM
-        .replace(/[\\u00A0\\s]+/g, '') // spaces including nbsp
+        .replace(/^\ufeff/, '') // BOM
+        .replace(/[\u00A0\s]+/g, '') // spaces including nbsp
         .replace(/[：:]/g,'') // full/half width colon
         .trim();
     }
@@ -136,9 +140,8 @@
       }
 
       const rows = parsed.data.map((raw, i)=>{
-        // reconstruct using index positions to avoid key mangling
         const cells = parsed.meta.fields.map((key)=> raw[key]);
-        const get = (k) => cells[idx[k]] ?? '';
+        const get = (k) => (k in idx? (cells[idx[k]] ?? '') : '');
         const countries = tokenize(get('國家'));
         const dims = [];
         const dimMain = get('三大構面').trim();
@@ -147,15 +150,18 @@
         if('模式與措施' in idx && isChecked(get('模式與措施'))) dims.push('模式與措施');
         if('執行面與困難' in idx && isChecked(get('執行面與困難'))) dims.push('執行面與困難');
 
+        const reporterMerged = [get('報告人'), get('報告者')].map(s=>s.trim()).filter(Boolean);
+
         return {
-          編號: (('編號' in idx)? get('編號'): ('row-'+(i+1))).trim(),
+          編號: (get('編號')||('row-'+(i+1))).trim(),
           主題: (get('主題')||'').trim(),
           國家s: countries,
           三大構面: dimMain,
           維度s: Array.from(new Set(dims)),
-          報告人: (('報告人' in idx)? get('報告人'):'').trim(),
-          報告者: (('報告者' in idx)? get('報告者'):'').trim(),
-          讀書會日期: (('讀書會日期' in idx)? get('讀書會日期'):'').trim(),
+          報告人: (get('報告人')||'').trim(),
+          報告者: (get('報告者')||'').trim(),
+          報告人合併: reporterMerged,
+          讀書會日期: (get('讀書會日期')||'').trim(),
         };
       }).filter(r => r.主題 || r.國家s.length);
       return rows;
@@ -170,7 +176,9 @@
         ].some(x => (x||'').toLowerCase().includes(q));
         const matchC = !state.country ? true : r['國家s'].includes(state.country);
         const matchD = !state.dim ? true : r['維度s'].includes(state.dim);
-        return matchQ && matchC && matchD;
+        const matchR = !state.reporter ? true : (r['報告人合併'].includes(state.reporter));
+        const matchDate = !state.date ? true : (r['讀書會日期'] === state.date);
+        return matchQ && matchC && matchD && matchR && matchDate;
       });
 
       $("#count").textContent = "結果：" + rows.length + " 筆";
@@ -180,6 +188,8 @@
       const af = [];
       if(state.country) af.push(["國家", state.country, ()=>{state.country=null; render();}]);
       if(state.dim) af.push(["構面/維度", state.dim, ()=>{state.dim=null; render();}]);
+      if(state.reporter) af.push(["報告者", state.reporter, ()=>{state.reporter=null; render();}]);
+      if(state.date) af.push(["日期", state.date, ()=>{state.date=null; render();}]);
       $("#activeFilters").innerHTML = "";
       af.forEach(([label, val, clear])=>{
         const el = document.createElement("div");
@@ -231,15 +241,25 @@
       });
 
       // quick filters
-      function counts(arrGetter){
+      function countsBy(listOfValues){
         const m = new Map();
-        state.rows.forEach(r=>arrGetter(r).forEach(x=>m.set(x,(m.get(x)||0)+1)));
+        listOfValues.forEach(x => {
+          if(Array.isArray(x)){ x.forEach(y=>{ if((y||'').trim()) m.set(y,(m.get(y)||0)+1); }); }
+          else{ if((x||'').trim()) m.set(x,(m.get(x)||0)+1); }
+        });
         return Array.from(m.entries()).sort((a,b)=>b[1]-a[1]);
       }
-      const cc = counts(r=>r['國家s']);
-      const dd = counts(r=>r['維度s']);
-      const $c = document.getElementById("countries"); const $d = document.getElementById("dimensions");
-      $c.innerHTML = ""; $d.innerHTML = "";
+      const cc = countsBy(state.rows.map(r=>r['國家s']));
+      const dd = countsBy(state.rows.map(r=>r['維度s']));
+      const rr = countsBy(state.rows.map(r=>r['報告人合併']));
+      const dt = countsBy(state.rows.map(r=>r['讀書會日期']));
+
+      const $c = document.getElementById("countries");
+      const $d = document.getElementById("dimensions");
+      const $r = document.getElementById("reporters");
+      const $t = document.getElementById("dates");
+      $c.innerHTML = ""; $d.innerHTML = ""; $r.innerHTML = ""; $t.innerHTML = "";
+
       cc.forEach(([c,n])=>{
         const el = document.createElement("div"); el.className="chip"; el.textContent = c + " · " + n;
         el.onclick = ()=>{ state.country=c; render(); };
@@ -249,6 +269,16 @@
         const el = document.createElement("div"); el.className="chip"; el.textContent = d + " · " + n;
         el.onclick = ()=>{ state.dim=d; render(); };
         $d.appendChild(el);
+      });
+      rr.forEach(([name,n])=>{
+        const el = document.createElement("div"); el.className="chip"; el.textContent = name + " · " + n;
+        el.onclick = ()=>{ state.reporter=name; render(); };
+        $r.appendChild(el);
+      });
+      dt.forEach(([date,n])=>{
+        const el = document.createElement("div"); el.className="chip"; el.textContent = date + " · " + n;
+        el.onclick = ()=>{ state.date=date; render(); };
+        $t.appendChild(el);
       });
     }
 
@@ -261,12 +291,16 @@
         render();
       }catch(err){
         console.error(err);
-        msg('<span class=\"warn\">讀取失敗：</span>' + (err && err.message? err.message: String(err)) + '<br>建議在 Excel 另存為「CSV UTF-8 (逗號分隔)(*.csv)」後再試。');
+        msg('<span class="warn">讀取失敗：</span>' + (err && err.message? err.message: String(err)) + '<br>建議在 Excel 另存為「CSV UTF-8 (逗號分隔)(*.csv)」後再試。');
       }
     }
 
     document.getElementById("q").addEventListener("input", (e)=>{ state.q = e.target.value; render(); });
-    document.getElementById("clear").addEventListener("click", ()=>{ state.q=''; document.getElementById('q').value=''; state.country=null; state.dim=null; render(); });
+    document.getElementById("clear").addEventListener("click", ()=>{
+      state.q=''; document.getElementById('q').value='';
+      state.country=null; state.dim=null; state.reporter=null; state.date=null;
+      render();
+    });
 
     document.getElementById("file").addEventListener("change", async (e)=>{
       const f = e.target.files[0];
