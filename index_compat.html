@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LTC 文獻快速檢索（相容版）</title>
+  <style>
+    :root { --bg:#0b1020; --card:#141a2e; --text:#e8ecf1; --muted:#aab3c2; --chip:#223055; --chip2:#2a375f; --accent:#6aa7ff; --warn:#ffb84d; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans TC","Microsoft JhengHei",sans-serif}
+    .wrap{max-width:1200px;margin:0 auto;padding:20px}
+    .header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+    .title{font-size:20px;font-weight:600}
+    .card{background:var(--card);border:1px solid #223; border-radius:16px; padding:16px}
+    .row{display:flex;gap:12px;align-items:center}
+    .input{flex:1;min-width:240px;padding:10px 12px;border-radius:10px;border:1px solid #29324a;background:#0f1426;color:var(--text)}
+    .btn{padding:8px 12px;border-radius:10px;border:1px solid #2e3a59;background:#10172a;color:var(--text);cursor:pointer}
+    .btn:hover{border-color:#3b4d78}
+    .chips{display:flex;flex-wrap:wrap;gap:8px}
+    .chip{padding:6px 10px;border-radius:999px;background:var(--chip);color:#d7e2f5;cursor:pointer;border:1px solid #2b3b66}
+    .chip:hover{background:var(--chip2)}
+    .muted{color:var(--muted);font-size:12px}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th, td{padding:10px 8px;border-top:1px solid #223;vertical-align:top}
+    th{color:#b9c5da;text-align:left;font-weight:600}
+    .badges{display:flex;flex-wrap:wrap;gap:6px}
+    .badge{background:#0e1a34;color:#cfe2ff;border:1px solid #274175;border-radius:8px;padding:3px 8px;display:inline-block}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:1000px){ .grid{grid-template-columns:2fr 1fr} }
+    a{color:var(--accent)}
+    .footer{color:#9fb2cc;font-size:12px;line-height:1.6}
+    .drop{border:2px dashed #3b4d78;border-radius:10px;padding:14px;text-align:center}
+    .warn{color:var(--warn)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="title">LTC 文獻快速檢索（相容版 / 本機）</div>
+      <div class="row">
+        <input id="file" type="file" accept=".csv" class="btn" />
+        <button class="btn" id="clear">清除篩選</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="muted">
+        若無法載入，<b class="warn">請把 Excel 另存為「CSV UTF-8 (逗號分隔)(*.csv)」</b> 再匯入。
+        欄位支援以下別名（容錯空白/BOM）：<br>
+        編號｜主題｜國家｜三大構面｜環境與政策｜模式與措施｜執行面與困難｜報告人｜報告者｜讀書會日期
+      </div>
+      <div id="drop" class="drop" style="margin-top:8px">拖曳 CSV 至此或按「選擇檔案」</div>
+      <div id="msg" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <div class="grid" style="margin-top:12px">
+      <div class="card">
+        <div class="row">
+          <input id="q" class="input" placeholder="輸入關鍵字（主題/報告人/國家/三大構面皆可）" />
+          <span class="muted" id="count">結果：0 筆</span>
+        </div>
+        <div class="chips" id="activeFilters" style="margin-top:8px"></div>
+        <div style="overflow:auto">
+          <table id="tbl">
+            <thead>
+              <tr>
+                <th>主題</th>
+                <th>國家/地區</th>
+                <th>三大構面 / 勾選維度</th>
+                <th>報告人 / 報告者</th>
+                <th>讀書會日期</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:6px">國家快速篩選</div>
+        <div class="chips" id="countries"></div>
+        <div style="font-weight:600;margin:12px 0 6px">構面/維度快速篩選</div>
+        <div class="chips" id="dimensions"></div>
+      </div>
+    </div>
+
+    <div class="footer" style="margin-top:12px">
+      隱私：資料僅在瀏覽器本機處理，不上傳伺服器。
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script>
+    const state = { rows: [], q: "", country: null, dim: null };
+    const $ = (sel) => document.querySelector(sel);
+    const msg = (s) => { document.getElementById('msg').innerHTML = s || ''; };
+
+    function normHeader(h){
+      return (h||'')
+        .replace(/^\\ufeff/, '') // BOM
+        .replace(/[\\u00A0\\s]+/g, '') // spaces including nbsp
+        .replace(/[：:]/g,'') // full/half width colon
+        .trim();
+    }
+    const headerMap = {
+      '編號':'編號',
+      '主題':'主題',
+      '國家':'國家',
+      '三大構面':'三大構面',
+      '環境與政策':'環境與政策',
+      '模式與措施':'模式與措施',
+      '執行面與困難':'執行面與困難',
+      '報告人':'報告人',
+      '報告者':'報告者',
+      '讀書會日期':'讀書會日期',
+    };
+
+    function tokenize(v){ return (v||'').split(/[;、,，/]/).map(s=>s.trim()).filter(Boolean); }
+    function isChecked(v){
+      const s = (v||'').trim();
+      return ['V','v','✔','✅','√','是','Yes','yes','Y','y','1','True','true'].includes(s) || (s.includes('V') && s.length<=3);
+    }
+
+    function parseCSV(text){
+      const parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+      if(!parsed.meta || !parsed.meta.fields){ throw new Error('CSV 無欄位標頭'); }
+      const fields = parsed.meta.fields.map(normHeader);
+      const idx = {};
+      fields.forEach((f, i)=>{
+        Object.keys(headerMap).forEach(k=>{
+          if(normHeader(k) === f){ idx[headerMap[k]] = i; }
+        });
+      });
+      const required = ['主題','國家'];
+      const missing = required.filter(k => !(k in idx));
+      if(missing.length){
+        throw new Error('缺少必要欄位：' + missing.join('、') + '。請確認第一列欄名是否為 UTF-8，或重存為「CSV UTF-8」。');
+      }
+
+      const rows = parsed.data.map((raw, i)=>{
+        // reconstruct using index positions to avoid key mangling
+        const cells = parsed.meta.fields.map((key)=> raw[key]);
+        const get = (k) => cells[idx[k]] ?? '';
+        const countries = tokenize(get('國家'));
+        const dims = [];
+        const dimMain = get('三大構面').trim();
+        if(dimMain) dims.push(dimMain);
+        if('環境與政策' in idx && isChecked(get('環境與政策'))) dims.push('環境與政策');
+        if('模式與措施' in idx && isChecked(get('模式與措施'))) dims.push('模式與措施');
+        if('執行面與困難' in idx && isChecked(get('執行面與困難'))) dims.push('執行面與困難');
+
+        return {
+          編號: (('編號' in idx)? get('編號'): ('row-'+(i+1))).trim(),
+          主題: (get('主題')||'').trim(),
+          國家s: countries,
+          三大構面: dimMain,
+          維度s: Array.from(new Set(dims)),
+          報告人: (('報告人' in idx)? get('報告人'):'').trim(),
+          報告者: (('報告者' in idx)? get('報告者'):'').trim(),
+          讀書會日期: (('讀書會日期' in idx)? get('讀書會日期'):'').trim(),
+        };
+      }).filter(r => r.主題 || r.國家s.length);
+      return rows;
+    }
+
+    function render(){
+      const q = state.q.toLowerCase().trim();
+      const rows = state.rows.filter(r=>{
+        const matchQ = !q ? true : [
+          r['主題'], r['報告人'], r['報告者'], r['三大構面'],
+          ...r['國家s'], ...r['維度s']
+        ].some(x => (x||'').toLowerCase().includes(q));
+        const matchC = !state.country ? true : r['國家s'].includes(state.country);
+        const matchD = !state.dim ? true : r['維度s'].includes(state.dim);
+        return matchQ && matchC && matchD;
+      });
+
+      $("#count").textContent = "結果：" + rows.length + " 筆";
+      msg(rows.length? '':'尚未載入資料或條件無結果。');
+
+      // active filters
+      const af = [];
+      if(state.country) af.push(["國家", state.country, ()=>{state.country=null; render();}]);
+      if(state.dim) af.push(["構面/維度", state.dim, ()=>{state.dim=null; render();}]);
+      $("#activeFilters").innerHTML = "";
+      af.forEach(([label, val, clear])=>{
+        const el = document.createElement("div");
+        el.className = "chip";
+        el.textContent = label + "：" + val + " ✕";
+        el.onclick = clear;
+        $("#activeFilters").appendChild(el);
+      });
+
+      // table
+      const tb = $("#tbl tbody");
+      tb.innerHTML = "";
+      rows.forEach(r=>{
+        const tr = document.createElement("tr");
+        const td1 = document.createElement("td");
+        const td2 = document.createElement("td");
+        const td3 = document.createElement("td");
+        const td4 = document.createElement("td");
+        const td5 = document.createElement("td");
+
+        const title = document.createElement("div");
+        title.textContent = r['主題'] || "(無主題)";
+        td1.appendChild(title);
+
+        const cwrap = document.createElement("div"); cwrap.className = "badges";
+        r['國家s'].forEach(c=>{
+          const b = document.createElement("span"); b.className="badge"; b.textContent=c;
+          b.style.cursor="pointer"; b.onclick=()=>{ state.country=c; render(); };
+          cwrap.appendChild(b);
+        });
+        td2.appendChild(cwrap);
+
+        const dwrap = document.createElement("div"); dwrap.className = "badges";
+        r['維度s'].forEach(d=>{
+          const b = document.createElement("span"); b.className="badge"; b.textContent=d;
+          b.style.cursor="pointer"; b.onclick=()=>{ state.dim=d; render(); };
+          dwrap.appendChild(b);
+        });
+        td3.appendChild(dwrap);
+
+        const rp1 = document.createElement("div"); rp1.textContent = r['報告人'] || "";
+        const rp2 = document.createElement("div"); rp2.className="muted"; rp2.textContent = r['報告者'] || "";
+        td4.appendChild(rp1); td4.appendChild(rp2);
+
+        td5.textContent = r['讀書會日期'] || "";
+
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5);
+        tb.appendChild(tr);
+      });
+
+      // quick filters
+      function counts(arrGetter){
+        const m = new Map();
+        state.rows.forEach(r=>arrGetter(r).forEach(x=>m.set(x,(m.get(x)||0)+1)));
+        return Array.from(m.entries()).sort((a,b)=>b[1]-a[1]);
+      }
+      const cc = counts(r=>r['國家s']);
+      const dd = counts(r=>r['維度s']);
+      const $c = document.getElementById("countries"); const $d = document.getElementById("dimensions");
+      $c.innerHTML = ""; $d.innerHTML = "";
+      cc.forEach(([c,n])=>{
+        const el = document.createElement("div"); el.className="chip"; el.textContent = c + " · " + n;
+        el.onclick = ()=>{ state.country=c; render(); };
+        $c.appendChild(el);
+      });
+      dd.forEach(([d,n])=>{
+        const el = document.createElement("div"); el.className="chip"; el.textContent = d + " · " + n;
+        el.onclick = ()=>{ state.dim=d; render(); };
+        $d.appendChild(el);
+      });
+    }
+
+    async function handleFile(f){
+      try{
+        msg('正在讀取：' + (f.name||'檔案') + ' …');
+        const text = await f.text(); // browser decodes as UTF-8
+        state.rows = parseCSV(text);
+        msg('載入成功，共 ' + state.rows.length + ' 筆。可用上方輸入與右側快速篩選');
+        render();
+      }catch(err){
+        console.error(err);
+        msg('<span class=\"warn\">讀取失敗：</span>' + (err && err.message? err.message: String(err)) + '<br>建議在 Excel 另存為「CSV UTF-8 (逗號分隔)(*.csv)」後再試。');
+      }
+    }
+
+    document.getElementById("q").addEventListener("input", (e)=>{ state.q = e.target.value; render(); });
+    document.getElementById("clear").addEventListener("click", ()=>{ state.q=''; document.getElementById('q').value=''; state.country=null; state.dim=null; render(); });
+
+    document.getElementById("file").addEventListener("change", async (e)=>{
+      const f = e.target.files[0];
+      if(!f) return;
+      await handleFile(f);
+    });
+
+    const drop = document.getElementById('drop');
+    drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.style.borderColor='#6aa7ff'; });
+    drop.addEventListener('dragleave', (e)=>{ e.preventDefault(); drop.style.borderColor='#3b4d78'; });
+    drop.addEventListener('drop', (e)=>{
+      e.preventDefault(); drop.style.borderColor='#3b4d78';
+      const f = e.dataTransfer.files[0];
+      if(f) handleFile(f);
+    });
+  </script>
+</body>
+</html>
