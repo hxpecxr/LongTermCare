@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LTC 文獻快速檢索（相容版＋報告者/日期）</title>
+  <title>LTC 文獻快速檢索（GViz JSON 免 CORS 版）</title>
   <style>
     :root { --bg:#0b1020; --card:#141a2e; --text:#e8ecf1; --muted:#aab3c2; --chip:#223055; --chip2:#2a375f; --accent:#6aa7ff; --warn:#ffb84d; }
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans TC","Microsoft JhengHei",sans-serif}
@@ -11,7 +11,7 @@
     .header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
     .title{font-size:20px;font-weight:600}
     .card{background:var(--card);border:1px solid #223; border-radius:16px; padding:16px}
-    .row{display:flex;gap:12px;align-items:center}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .input{flex:1;min-width:240px;padding:10px 12px;border-radius:10px;border:1px solid #29324a;background:#0f1426;color:var(--text)}
     .btn{padding:8px 12px;border-radius:10px;border:1px solid #2e3a59;background:#10172a;color:var(--text);cursor:pointer}
     .btn:hover{border-color:#3b4d78}
@@ -24,31 +24,35 @@
     th{color:#b9c5da;text-align:left;font-weight:600}
     .badges{display:flex;flex-wrap:wrap;gap:6px}
     .badge{background:#0e1a34;color:#cfe2ff;border:1px solid #274175;border-radius:8px;padding:3px 8px;display:inline-block}
-    .grid{display:grid;grid-template-columns:1fr;gap:12px}
-    @media(min-width:1000px){ .grid{grid-template-columns:2fr 1fr} }
+    .grid{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+    @media(max-width:1000px){ .grid{grid-template-columns:1fr} }
     a{color:var(--accent)}
     .footer{color:#9fb2cc;font-size:12px;line-height:1.6}
     .drop{border:2px dashed #3b4d78;border-radius:10px;padding:14px;text-align:center}
-    .warn{color:var(--warn)}
+    .warn{color:#ffb84d}
+    code.small{font-size:12px}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="header">
-      <div class="title">LTC 文獻快速檢索（相容版 / 本機）</div>
+      <div class="title">LTC 文獻快速檢索（GViz JSON 免 CORS / 本機）</div>
       <div class="row">
-        <input id="file" type="file" accept=".csv" class="btn" />
+        <input id="file" type="file" accept=".csv,.tsv,.xlsx" class="btn" />
         <button class="btn" id="clear">清除篩選</button>
       </div>
     </div>
 
     <div class="card" style="margin-top:12px">
-      <div class="muted">
-        若無法載入，<b class="warn">請把 Excel 另存為「CSV UTF-8 (逗號分隔)(*.csv)」</b> 再匯入。
-        欄位支援以下別名（容錯空白/BOM）：<br>
-        編號｜主題｜國家｜三大構面｜環境與政策｜模式與措施｜執行面與困難｜報告人｜報告者｜讀書會日期
+      <div class="row">
+        <input id="src" class="input" value="https://docs.google.com/spreadsheets/d/1dr84H-_0SB1bBvShK4EeWPgSDSXB1JNUWApC4Ok2LqQ/gviz/tq?tqx=out:json&gid=0" />
+        <button class="btn" id="reload">以此網址重新載入</button>
       </div>
-      <div id="drop" class="drop" style="margin-top:8px">拖曳 CSV 至此或按「選擇檔案」</div>
+      <div class="muted" style="margin-top:6px">
+        這是 <b>GViz JSON</b> 端點（非 CSV/TSV），透過 <code class="small">&lt;script&gt;</code> 注入繞過 CORS；<br>
+        如需改分頁，請將網址中的 <code class="small">gid=0</code> 換成目標分頁的 gid。
+      </div>
+      <div id="drop" class="drop" style="margin-top:8px">拖曳 CSV/TSV/XLSX 至此或按「選擇檔案」</div>
       <div id="msg" class="muted" style="margin-top:8px"></div>
     </div>
 
@@ -92,6 +96,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
     const state = { rows: [], q: "", country: null, dim: null, reporter: null, date: null };
     const $ = (sel) => document.querySelector(sel);
@@ -105,16 +110,9 @@
         .trim();
     }
     const headerMap = {
-      '編號':'編號',
-      '主題':'主題',
-      '國家':'國家',
-      '三大構面':'三大構面',
-      '環境與政策':'環境與政策',
-      '模式與措施':'模式與措施',
-      '執行面與困難':'執行面與困難',
-      '報告人':'報告人',
-      '報告者':'報告者',
-      '讀書會日期':'讀書會日期',
+      '編號':'編號','主題':'主題','國家':'國家','三大構面':'三大構面',
+      '環境與政策':'環境與政策','模式與措施':'模式與措施','執行面與困難':'執行面與困難',
+      '報告人':'報告人','報告者':'報告者','讀書會日期':'讀書會日期',
     };
 
     function tokenize(v){ return (v||'').split(/[;、,，/]/).map(s=>s.trim()).filter(Boolean); }
@@ -123,35 +121,26 @@
       return ['V','v','✔','✅','√','是','Yes','yes','Y','y','1','True','true'].includes(s) || (s.includes('V') && s.length<=3);
     }
 
-    function parseCSV(text){
-      const parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
-      if(!parsed.meta || !parsed.meta.fields){ throw new Error('CSV 無欄位標頭'); }
-      const fields = parsed.meta.fields.map(normHeader);
+    function parseRows(records){
+      if(!records || !records.length) return [];
+      const sample = records[0] || {};
+      const fields = Object.keys(sample);
+      const normFields = fields.map(normHeader);
       const idx = {};
-      fields.forEach((f, i)=>{
-        Object.keys(headerMap).forEach(k=>{
-          if(normHeader(k) === f){ idx[headerMap[k]] = i; }
-        });
-      });
+      normFields.forEach((f, i)=>{ Object.keys(headerMap).forEach(k=>{ if(normHeader(k)===f) idx[headerMap[k]] = fields[i]; }); });
       const required = ['主題','國家'];
       const missing = required.filter(k => !(k in idx));
-      if(missing.length){
-        throw new Error('缺少必要欄位：' + missing.join('、') + '。請確認第一列欄名是否為 UTF-8，或重存為「CSV UTF-8」。');
-      }
-
-      const rows = parsed.data.map((raw, i)=>{
-        const cells = parsed.meta.fields.map((key)=> raw[key]);
-        const get = (k) => (k in idx? (cells[idx[k]] ?? '') : '');
+      if(missing.length) throw new Error('缺少必要欄位：' + missing.join('、') + '。');
+      return records.map((raw, i)=>{
+        const get = (k) => (k in idx ? (raw[idx[k]] ?? '') : '');
         const countries = tokenize(get('國家'));
         const dims = [];
-        const dimMain = get('三大構面').trim();
+        const dimMain = (get('三大構面')||'').trim();
         if(dimMain) dims.push(dimMain);
-        if('環境與政策' in idx && isChecked(get('環境與政策'))) dims.push('環境與政策');
-        if('模式與措施' in idx && isChecked(get('模式與措施'))) dims.push('模式與措施');
-        if('執行面與困難' in idx && isChecked(get('執行面與困難'))) dims.push('執行面與困難');
-
+        if(isChecked(get('環境與政策'))) dims.push('環境與政策');
+        if(isChecked(get('模式與措施'))) dims.push('模式與措施');
+        if(isChecked(get('執行面與困難'))) dims.push('執行面與困難');
         const reporterMerged = [get('報告人'), get('報告者')].map(s=>s.trim()).filter(Boolean);
-
         return {
           編號: (get('編號')||('row-'+(i+1))).trim(),
           主題: (get('主題')||'').trim(),
@@ -164,7 +153,6 @@
           讀書會日期: (get('讀書會日期')||'').trim(),
         };
       }).filter(r => r.主題 || r.國家s.length);
-      return rows;
     }
 
     function render(){
@@ -181,26 +169,18 @@
         return matchQ && matchC && matchD && matchR && matchDate;
       });
 
-      $("#count").textContent = "結果：" + rows.length + " 筆";
+      document.getElementById("count").textContent = "結果：" + rows.length + " 筆";
       msg(rows.length? '':'尚未載入資料或條件無結果。');
 
-      // active filters
       const af = [];
       if(state.country) af.push(["國家", state.country, ()=>{state.country=null; render();}]);
       if(state.dim) af.push(["構面/維度", state.dim, ()=>{state.dim=null; render();}]);
       if(state.reporter) af.push(["報告者", state.reporter, ()=>{state.reporter=null; render();}]);
       if(state.date) af.push(["日期", state.date, ()=>{state.date=null; render();}]);
-      $("#activeFilters").innerHTML = "";
-      af.forEach(([label, val, clear])=>{
-        const el = document.createElement("div");
-        el.className = "chip";
-        el.textContent = label + "：" + val + " ✕";
-        el.onclick = clear;
-        $("#activeFilters").appendChild(el);
-      });
+      document.getElementById("activeFilters").innerHTML = "";
+      af.forEach(([label, val, clear])=>{ const el = document.createElement("div"); el.className="chip"; el.textContent = label + "：" + val + " ✕"; el.onclick = clear; document.getElementById("activeFilters").appendChild(el); });
 
-      // table
-      const tb = $("#tbl tbody");
+      const tb = document.getElementById("tbl").querySelector("tbody");
       tb.innerHTML = "";
       rows.forEach(r=>{
         const tr = document.createElement("tr");
@@ -215,107 +195,125 @@
         td1.appendChild(title);
 
         const cwrap = document.createElement("div"); cwrap.className = "badges";
-        r['國家s'].forEach(c=>{
-          const b = document.createElement("span"); b.className="badge"; b.textContent=c;
-          b.style.cursor="pointer"; b.onclick=()=>{ state.country=c; render(); };
-          cwrap.appendChild(b);
-        });
+        r['國家s'].forEach(c=>{ const b = document.createElement("span"); b.className="badge"; b.textContent=c; b.style.cursor="pointer"; b.onclick=()=>{ state.country=c; render(); }; cwrap.appendChild(b); });
         td2.appendChild(cwrap);
 
         const dwrap = document.createElement("div"); dwrap.className = "badges";
-        r['維度s'].forEach(d=>{
-          const b = document.createElement("span"); b.className="badge"; b.textContent=d;
-          b.style.cursor="pointer"; b.onclick=()=>{ state.dim=d; render(); };
-          dwrap.appendChild(b);
-        });
+        r['維度s'].forEach(d=>{ const b = document.createElement("span"); b.className="badge"; b.textContent=d; b.style.cursor="pointer"; b.onclick=()=>{ state.dim=d; render(); }; dwrap.appendChild(b); });
         td3.appendChild(dwrap);
 
         const rp1 = document.createElement("div"); rp1.textContent = r['報告人'] || "";
         const rp2 = document.createElement("div"); rp2.className="muted"; rp2.textContent = r['報告者'] || "";
         td4.appendChild(rp1); td4.appendChild(rp2);
 
-        td5.textContent = r['讀書會日期'] || "";
+        const dt = document.createElement("div"); dt.textContent = r['讀書會日期'] || "";
+        td5.appendChild(dt);
 
         tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5);
         tb.appendChild(tr);
       });
 
-      // quick filters
       function countsBy(listOfValues){
         const m = new Map();
-        listOfValues.forEach(x => {
-          if(Array.isArray(x)){ x.forEach(y=>{ if((y||'').trim()) m.set(y,(m.get(y)||0)+1); }); }
-          else{ if((x||'').trim()) m.set(x,(m.get(x)||0)+1); }
-        });
+        listOfValues.forEach(x => { if(Array.isArray(x)) x.forEach(y=>{ if((y||'').trim()) m.set(y,(m.get(y)||0)+1); }); else if((x||'').trim()) m.set(x,(m.get(x)||0)+1); });
         return Array.from(m.entries()).sort((a,b)=>b[1]-a[1]);
       }
       const cc = countsBy(state.rows.map(r=>r['國家s']));
       const dd = countsBy(state.rows.map(r=>r['維度s']));
       const rr = countsBy(state.rows.map(r=>r['報告人合併']));
-      const dt = countsBy(state.rows.map(r=>r['讀書會日期']));
+      const dt2 = countsBy(state.rows.map(r=>r['讀書會日期']));
 
       const $c = document.getElementById("countries");
       const $d = document.getElementById("dimensions");
       const $r = document.getElementById("reporters");
       const $t = document.getElementById("dates");
       $c.innerHTML = ""; $d.innerHTML = ""; $r.innerHTML = ""; $t.innerHTML = "";
-
-      cc.forEach(([c,n])=>{
-        const el = document.createElement("div"); el.className="chip"; el.textContent = c + " · " + n;
-        el.onclick = ()=>{ state.country=c; render(); };
-        $c.appendChild(el);
-      });
-      dd.forEach(([d,n])=>{
-        const el = document.createElement("div"); el.className="chip"; el.textContent = d + " · " + n;
-        el.onclick = ()=>{ state.dim=d; render(); };
-        $d.appendChild(el);
-      });
-      rr.forEach(([name,n])=>{
-        const el = document.createElement("div"); el.className="chip"; el.textContent = name + " · " + n;
-        el.onclick = ()=>{ state.reporter=name; render(); };
-        $r.appendChild(el);
-      });
-      dt.forEach(([date,n])=>{
-        const el = document.createElement("div"); el.className="chip"; el.textContent = date + " · " + n;
-        el.onclick = ()=>{ state.date=date; render(); };
-        $t.appendChild(el);
-      });
+      cc.forEach(([c,n])=>{ const el = document.createElement("div"); el.className="chip"; el.textContent = c + " · " + n; el.onclick = ()=>{ state.country=c; render(); }; $c.appendChild(el); });
+      dd.forEach(([d,n])=>{ const el = document.createElement("div"); el.className="chip"; el.textContent = d + " · " + n; el.onclick = ()=>{ state.dim=d; render(); }; $d.appendChild(el); });
+      rr.forEach(([name,n])=>{ const el = document.createElement("div"); el.className="chip"; el.textContent = name + " · " + n; el.onclick = ()=>{ state.reporter=name; render(); }; $r.appendChild(el); });
+      dt2.forEach(([date,n])=>{ const el = document.createElement("div"); el.className="chip"; el.textContent = date + " · " + n; el.onclick = ()=>{ state.date=date; render(); }; $t.appendChild(el); });
     }
 
+    function parseCSVorTSV(text){
+      const firstLine = text.split(/\r?\n/)[0] || '';
+      const delimiter = firstLine.includes('\t') ? '\t' : ',';
+      const parsed = Papa.parse(text, { header:true, skipEmptyLines:true, delimiter });
+      if(!parsed.meta || !parsed.meta.fields) throw new Error('無欄位標頭');
+      return parsed.data;
+    }
+
+    async function parseXLSX(file){
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: "array" });
+      const first = wb.SheetNames[0];
+      const ws = wb.Sheets[first];
+      return XLSX.utils.sheet_to_json(ws, { defval: "" });
+    }
+
+    async function handleTextFile(f){ const text = await f.text(); const records = parseCSVorTSV(text); state.rows = parseRows(records); render(); }
+    async function handleXLSX(f){ const records = await parseXLSX(f); state.rows = parseRows(records); render(); }
     async function handleFile(f){
-      try{
-        msg('正在讀取：' + (f.name||'檔案') + ' …');
-        const text = await f.text(); // browser decodes as UTF-8
-        state.rows = parseCSV(text);
-        msg('載入成功，共 ' + state.rows.length + ' 筆。可用上方輸入與右側快速篩選');
-        render();
-      }catch(err){
-        console.error(err);
-        msg('<span class="warn">讀取失敗：</span>' + (err && err.message? err.message: String(err)) + '<br>建議在 Excel 另存為「CSV UTF-8 (逗號分隔)(*.csv)」後再試。');
-      }
+      try{ msg('正在讀取：' + (f.name||'檔案') + ' …'); const ext = (f.name||'').toLowerCase().split('.').pop();
+        if(ext === 'xlsx') await handleXLSX(f); else await handleTextFile(f);
+        msg('載入成功，共 ' + state.rows.length + ' 筆。'); }catch(err){ console.error(err); msg('<span class="warn">讀取失敗：</span>' + (err?.message||String(err))); }
     }
 
     document.getElementById("q").addEventListener("input", (e)=>{ state.q = e.target.value; render(); });
-    document.getElementById("clear").addEventListener("click", ()=>{
-      state.q=''; document.getElementById('q').value='';
-      state.country=null; state.dim=null; state.reporter=null; state.date=null;
-      render();
-    });
-
-    document.getElementById("file").addEventListener("change", async (e)=>{
-      const f = e.target.files[0];
-      if(!f) return;
-      await handleFile(f);
-    });
-
-    const drop = document.getElementById('drop');
-    drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.style.borderColor='#6aa7ff'; });
+    document.getElementById("clear").addEventListener("click", ()=>{ state.q=''; document.getElementById('q').value=''; state.country=null; state.dim=null; state.reporter=null; state.date=null; render(); });
+    document.getElementById("file").addEventListener("change", async (e)=>{ const f = e.target.files[0]; if(f) await handleFile(f); });
+    const drop = document.getElementById('drop'); drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.style.borderColor='#6aa7ff'; });
     drop.addEventListener('dragleave', (e)=>{ e.preventDefault(); drop.style.borderColor='#3b4d78'; });
-    drop.addEventListener('drop', (e)=>{
-      e.preventDefault(); drop.style.borderColor='#3b4d78';
-      const f = e.dataTransfer.files[0];
-      if(f) handleFile(f);
-    });
+    drop.addEventListener('drop', (e)=>{ e.preventDefault(); drop.style.borderColor='#3b4d78'; const f = e.dataTransfer.files[0]; if(f) handleFile(f); });
+
+    // ---- GViz JSON loader (CORS-free via <script> injection) ----
+    function gvizToRecords(resp){
+      // resp.table.cols -> labels; resp.table.rows -> c: [{v, f}]
+      const cols = (resp.table && resp.table.cols) ? resp.table.cols.map(c=>c.label||'') : [];
+      const rows = (resp.table && resp.table.rows) ? resp.table.rows : [];
+      const recs = rows.map(r=>{
+        const obj = {};
+        (r.c||[]).forEach((cell, i)=>{ obj[cols[i]||('col'+i)] = (cell && (cell.f ?? cell.v)) ?? ''; });
+        return obj;
+      });
+      return recs;
+    }
+
+    function loadGVizJSON(url){
+      return new Promise((resolve, reject)=>{
+        // Build a sandboxed callback catcher
+        const cbName = "__gviz_cb_" + Math.random().toString(36).slice(2);
+        // Monkey-patch the global that GViz uses
+        const g = window.google = window.google || {};
+        g.visualization = g.visualization || {};
+        g.visualization.Query = g.visualization.Query || {};
+        g.visualization.Query.setResponse = function(resp){ try{ resolve(resp); }catch(e){ reject(e); } finally{ cleanup(); } };
+        function cleanup(){ if(script.parentNode) script.parentNode.removeChild(script); }
+        const script = document.createElement('script');
+        script.src = url;
+        script.onerror = () => { cleanup(); reject(new Error('Script load error')); };
+        document.head.appendChild(script);
+      });
+    }
+
+    async function autoLoadFromInput(){
+      try{
+        const url = document.getElementById('src').value.trim();
+        msg('正在以 GViz JSON 方式載入…');
+        const resp = await loadGVizJSON(url);
+        if(!resp || resp.status !== 'ok') throw new Error('GViz 回應非 ok');
+        const records = gvizToRecords(resp);
+        state.rows = parseRows(records);
+        msg('雲端載入完成，共 ' + state.rows.length + ' 筆。');
+        render();
+      }catch(err){
+        console.error(err);
+        msg('<span class="warn">雲端自動載入失敗</span>：' + (err?.message||String(err)) + '<br>仍可用上方「選擇檔案」手動匯入（CSV/TSV/XLSX）。');
+      }
+    }
+
+    document.getElementById('reload').addEventListener('click', autoLoadFromInput);
+    // auto load on first open
+    autoLoadFromInput();
   </script>
 </body>
 </html>
